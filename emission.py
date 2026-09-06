@@ -2,6 +2,26 @@ import numpy as np
 from scipy.integrate import quad
 from scipy.stats import beta as beta_dist
 from scipy.special import betaln, gammaln
+
+# Commencement de HMM
+"""
+probabilité d'emission sert a savoir si c'est dans alpha0 ou alpha 1 ou 2 
+"""
+from math import comb # comb sert a calculer le coefficient binomiale 
+import numpy as np
+from scipy.integrate import quad
+from scipy.special import gammaln
+
+from math import comb
+
+def binomial_probability(x, n, p):
+    return (
+        comb(n, x)
+        * p**x
+        * (1-p)**(n-x)
+    )
+
+
 """
 x1 : nombre de fragments ESC dans la fenêtre
 x2 : nombre de fragments NPC dans la fenêtre
@@ -114,8 +134,15 @@ def emission_probability(
             return probability_p1
 
         # On évite exactement 0 et 1
-        eps = 1e-10
-
+        """
+        pour ca il fait une intégrale :
+        Intègre numériquement integrand pour toutes les valeurs possibles de q entre 0 et 1, 
+        avec une certaine précision, puis retourne le résultat de cette intégrale.
+        """
+        eps = 1e-10 #Ne commence pas exactement à 0 et ne termine pas exactement à 1.
+        # Quelle est la proportion des valeurs possibles de p1 et p2 qui correspondent à l'état que je suis en train d'étudier ?
+        """quad est juste un outil qui fait une addition très précise.
+"""
         result, error = quad(
             integrand,
             eps,
@@ -124,21 +151,20 @@ def emission_probability(
             epsrel=1e-6,
             limit=100
         )
+        #Prends ma fonction integrand et calcule sa somme sur toutes les valeurs entre presque 0 et presque 1.
 
         return result
 
-    # ------------------------------------------------
     # 4. Région sous le posterior
-    # ------------------------------------------------
 
     posterior_region = region_probability(
         a1, b1,
         a2, b2
     )
+    # avant d'observer les echantillions 
 
-    # ------------------------------------------------
     # 5. Région sous le prior
-    # ------------------------------------------------
+    # vérification de sécurité
 
     prior_region = region_probability(
         alpha, beta_param,
@@ -150,23 +176,27 @@ def emission_probability(
 
     if prior_region <= 0:
         return 0.0
+    
 
-    # ------------------------------------------------
     # 6. Probabilité d'émission finale
-    # ------------------------------------------------
+    """ log_marginal_1 : Est-ce que les données observées en ESC sont compatibles avec les intensités que le modèle considère ?
+        log_marginal_2 : Est-ce que les données observées en NPS sont compatibles avec les intensités que le modèle considère ?
+    """
 
     log_emission = (
         log_marginal_1
         + log_marginal_2
-        + np.log(posterior_region)
-        - np.log(prior_region)
+        + np.log(posterior_region) #a probabilité d'être dans la région correspondant à l'état après avoir observé les données.
+        - np.log(prior_region) #prior_region représente la même chose mais avant d'observer les données.
     )
+    # on compare les données avant de les avoir avec ceux d'après 
+    # le log est pour éviter d'avoir des proba trop petites 
 
     # Évite l'underflow
     if log_emission < -745:
         return 0.0
-
-    return np.exp(log_emission)
+    # PROTECTION informatique Si le log est inférieur à -745, la probabilité est tellement petite qu'on la considère comme 0.
+    return np.exp(log_emission) # exp pour enlever le log après les calcules
 
 #test sur une fenettre
 x_es = 30

@@ -1,6 +1,7 @@
 import numpy as np
 n_states = 3
 
+
 transition_matrix = np.array([
     [0.90, 0.05, 0.05],
     [0.05, 0.90, 0.05],
