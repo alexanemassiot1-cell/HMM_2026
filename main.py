@@ -1,6 +1,6 @@
 from count_reads import count_reads
 from posterior import posterior_parameters, posterior_mean
-from emission import calculate_emissions, emission_probability, build_emission_lookup
+from emission import calculate_emissions, emission_probability, build_emission_lookup, emissions_from_lookup
 from baum_welch import baum_welch
 
 
@@ -76,12 +76,64 @@ emission_lookup = build_emission_lookup(
     tau
 )
 
-print(
-    "Nombre d'entrées dans la lookup table :",
-    len(emission_lookup)
+emissions = emissions_from_lookup(
+    candidate_bins,
+    emission_lookup
 )
 
+print("Matrice des émissions :", emissions.shape)
 
+
+#pour pas faire sur toute l'echantilions on fait sur 1000 aléatoirement
+test_candidate_bins = candidate_bins[:1000]
+
+test_emissions = emissions_from_lookup(
+    test_candidate_bins,
+    emission_lookup
+)
+
+print("Test emissions :", test_emissions.shape)
+# 4. Initialisation de la matrice de transition
+# TEST BAUM-WELCH SUR 1000 BINS RÉELS
+
+test_emissions = emissions[:1000]
+
+transition_matrix = np.array([
+    [0.90, 0.05, 0.05],
+    [0.05, 0.90, 0.05],
+    [0.05, 0.05, 0.90]
+])
+
+initial_probabilities = np.array([
+    1.0,
+    0.0,
+    0.0
+])
+
+print("Matrice test :", test_emissions.shape)
+print("Début Baum-Welch sur 1000 bins réels...")
+
+learned_transition_matrix = baum_welch(
+    test_emissions,
+    transition_matrix,
+    initial_probabilities
+)
+
+print("Matrice de transition apprise :")
+print(learned_transition_matrix)
+
+"""
+print("Début de Baum-Welch sur les données réelles...")
+
+# 5. Apprentissage de la matrice de transition
+learned_transition_matrix = baum_welch(
+    emissions,
+    transition_matrix,
+    initial_probabilities
+)
+
+print("Matrice de transition apprise :")
+print(learned_transition_matrix)
 
 
 #_---------------------------
@@ -130,7 +182,7 @@ e2 = emission_probability(
 print("Emission α0 :", e0)
 print("Emission α1 :", e1)
 print("Emission α2 :", e2)
-
+"""
 """emissions = calculate_emissions(
     test_bins,
     n1,

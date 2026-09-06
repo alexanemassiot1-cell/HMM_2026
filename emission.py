@@ -5,6 +5,7 @@ from scipy.stats import beta as beta_dist
 from scipy.special import betaln, gammaln
 
 from posterior import posterior_parameters
+import warnings
 
 
 # ============================================================
@@ -71,8 +72,8 @@ def region_probability(a1, b1, a2, b2, tau, etat):
 
     def integrand(q):
 
-        # On transforme une probabilité uniforme q
-        # en quantile de la loi Beta de p2
+    # On transforme une probabilité uniforme q
+    # en quantile de la loi Beta de p2
         p2 = beta_dist.ppf(q, a2, b2)
 
         if not np.isfinite(p2):
@@ -85,8 +86,18 @@ def region_probability(a1, b1, a2, b2, tau, etat):
 
         low, high = bounds
 
-        # Probabilité que p1 soit dans la région autorisée
-        probability_p1 = (
+    # Probabilité que p1 soit dans la région autorisée
+        if etat == 1:
+        # alpha1 : p1 >= low
+            probability_p1 = beta_dist.sf(low, a1, b1)
+
+        elif etat == 2:
+        # alpha2 : p1 <= high
+            probability_p1 = beta_dist.cdf(high, a1, b1)
+
+        else:
+        # alpha0 : low <= p1 <= high
+            probability_p1 = (
             beta_dist.cdf(high, a1, b1)
             - beta_dist.cdf(low, a1, b1)
         )
@@ -182,11 +193,11 @@ def emission_probability(
     )
 
     if posterior_region <= 0:
-        print("DEBUG : posterior_region = 0 pour état", etat)
+        
         return 0.0
 
     if prior_region <= 0:
-        print("DEBUG : prior_region = 0 pour état", etat)
+        
         return 0.0
 
     # --------------------------------------------------------
@@ -200,12 +211,7 @@ def emission_probability(
         - np.log(prior_region)
     )
 
-    print(
-    "DEBUG état", etat,
-    "x1=", x1,
-    "x2=", x2,
-    "log_emission=", log_emission
-)
+
 
     # Protection contre l'underflow
     if log_emission < -745:
@@ -318,31 +324,55 @@ def build_emission_lookup(
             m
         )
 
-        e0 = emission_probability(
-            x1, x2,
-            n1, n2,
-            a1, b1,
-            a2, b2,
-            m, tau,
-            0
+        with warnings.catch_warnings(record=True) as caught_warnings:
+            warnings.simplefilter("always")
+
+            e0 = emission_probability(
+        x1, x2,
+        n1, n2,
+        a1, b1,
+        a2, b2,
+        m, tau,
+        0
+    )
+            if caught_warnings:
+                print(
+            "WARNING pour le couple :",
+            (x1, x2),
+            "état α0"
+        )
+        with warnings.catch_warnings(record=True) as caught_warnings:
+            warnings.simplefilter("always")
+            e1 = emission_probability(
+        x1, x2,
+        n1, n2,
+        a1, b1,
+        a2, b2,
+        m, tau,
+        1
+    )
+            if caught_warnings:
+                print(
+            "WARNING pour le couple :",
+            (x1, x2),
+            "état α1"
         )
 
-        e1 = emission_probability(
-            x1, x2,
-            n1, n2,
-            a1, b1,
-            a2, b2,
-            m, tau,
-            1
-        )
-
-        e2 = emission_probability(
-            x1, x2,
-            n1, n2,
-            a1, b1,
-            a2, b2,
-            m, tau,
-            2
+        with warnings.catch_warnings(record=True) as caught_warnings:
+            warnings.simplefilter("always")
+            e2 = emission_probability(
+        x1, x2,
+        n1, n2,
+        a1, b1,
+        a2, b2,
+        m, tau,
+        2
+    )
+            if caught_warnings:
+                print(
+            "WARNING pour le couple :",
+            (x1, x2),
+            "état α2"
         )
 
         lookup[(x1, x2)] = (
@@ -352,3 +382,19 @@ def build_emission_lookup(
         )
 
     return lookup
+
+
+# transformer la table en matrice 
+def emissions_from_lookup(candidate_bins, emission_lookup):
+
+    emissions = []
+
+    for chromosome, start, x1, x2 in candidate_bins:
+
+        key = (x1, x2)
+
+        emissions.append(
+            emission_lookup[key]
+        )
+
+    return np.array(emissions)

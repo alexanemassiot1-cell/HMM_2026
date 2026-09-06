@@ -52,17 +52,18 @@ def baum_welch(
     for iteration in range(max_iterations): # répétitions de l'apprentissage plusieurs fois 
 
         # 1. Forward avant chaque bins
-        forward = forward_algorithm(
+        forward, scaling = forward_algorithm(
             emissions,
             transition_matrix,
             initial_probabilities
-        )
+            )
 
         # 2. Backward après chaque bins 
         backward = backward_algorithm(
             emissions,
-            transition_matrix
-        )
+            transition_matrix, 
+            scaling
+            )
 
         # 3. Probabilités des transitions : Quelle est la probabilité que le modèle soit passé de α0 → α1, α1 → α1, etc. ?
         xi = transition_probabilities(

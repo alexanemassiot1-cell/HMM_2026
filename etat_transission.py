@@ -19,21 +19,42 @@ def transition_probability(previous_state, current_state, transition_matrix):
 
 transition_probability(0, 1, transition_matrix)
 
+import numpy as np
+
+
 def forward_algorithm(emissions, transition_matrix, initial_probabilities):
+    """
+    Algorithme Forward avec normalisation à chaque bin.
+
+    emissions :
+        matrice (nombre_de_bins, 3)
+        colonnes = alpha0, alpha1, alpha2
+
+    transition_matrix :
+        matrice 3 x 3
+
+    initial_probabilities :
+        probabilités initiales des 3 états
+    """
 
     n_bins = len(emissions)
-    n_states = 3
+    n_states = emissions.shape[1]
 
     forward = np.zeros((n_bins, n_states))
+    scaling = np.zeros(n_bins)
 
-    # Premier bin
-    for state in range(n_states):
-        forward[0, state] = (
-            initial_probabilities[state]
-            * emissions[0, state]
-        )
+    # Initialisation
+    forward[0, :] = (
+        initial_probabilities
+        * emissions[0, :]
+    )
 
-    # Bins suivants
+    scaling[0] = np.sum(forward[0, :])
+
+    if scaling[0] > 0:
+        forward[0, :] /= scaling[0]
+
+    # Récursion
     for i in range(1, n_bins):
 
         for current_state in range(n_states):
@@ -51,26 +72,38 @@ def forward_algorithm(emissions, transition_matrix, initial_probabilities):
                 )
 
             forward[i, current_state] = (
-                total
-                * emissions[i, current_state]
+                total * emissions[i, current_state]
             )
 
-    return forward
+        # Normalisation
+        scaling[i] = np.sum(forward[i, :])
+
+        if scaling[i] > 0:
+            forward[i, :] /= scaling[i]
+
+    return forward, scaling
 
 
-def backward_algorithm(emissions, transition_matrix):
+def backward_algorithm(
+    emissions,
+    transition_matrix,
+    scaling
+):
+    """
+    Algorithme Backward avec les mêmes facteurs
+    de normalisation que Forward.
+    """
 
     n_bins = len(emissions)
-    n_states = 3
+    n_states = emissions.shape[1]
 
-    backward = np.zeros((n_bins, n_states)) 
+    backward = np.zeros((n_bins, n_states))
 
     # Dernier bin
-    for state in range(n_states):
-        backward[n_bins - 1, state] = 1.0 # Pour le dernier bin, on met 1.0 parce qu'il n'y a plus de bin après lui.
+    backward[n_bins - 1, :] = 1.0
 
-    # On remonte vers le premier bin
-    for i in range(n_bins - 2, -1, -1): # On commence à l'avant-dernier bin et on remonte jusqu'au premier.
+    # Récursion inverse
+    for i in range(n_bins - 2, -1, -1):
 
         for current_state in range(n_states):
 
@@ -79,54 +112,68 @@ def backward_algorithm(emissions, transition_matrix):
             for next_state in range(n_states):
 
                 total += (
-                    transition_matrix[ #quelle est la probabilité de passer de l'état actuel à l'état du bin suivant ?
+                    transition_matrix[
                         current_state,
                         next_state
                     ]
-                    * emissions[i + 1, next_state] #correspond à la probabilité d'observer les données du bin suivant si celui-ci est dans next_state.
-                    * backward[i + 1, next_state] #contient déjà les informations provenant de tous les bins situés après.
+                    * emissions[i + 1, next_state]
+                    * backward[i + 1, next_state]
                 )
 
             backward[i, current_state] = total
 
+        # Même normalisation que Forward
+        if scaling[i + 1] > 0:
+            backward[i, :] /= scaling[i + 1]
+
     return backward
 
+
 def state_probabilities(forward, backward):
+    """
+    Calcule P(S_i = état | données)
+    """
 
     n_bins = forward.shape[0]
     n_states = forward.shape[1]
 
-    probabilities = np.zeros((n_bins, n_states))
+    probabilities = np.zeros(
+        (n_bins, n_states)
+    )
 
     for i in range(n_bins):
 
-        total = 0.0
+        probabilities[i, :] = (
+            forward[i, :]
+            * backward[i, :]
+        )
 
-        # On combine Forward et Backward
-        for state in range(n_states):
-            probabilities[i, state] = (
-                forward[i, state]
-                * backward[i, state]
-            )
-            total += probabilities[i, state]
+        total = np.sum(probabilities[i, :])
 
-        # Normalisation
         if total > 0:
             probabilities[i, :] /= total
 
     return probabilities
 
-# Partie Baum welch qui apprend la matrice de transision 
-"""
-xi apprend la probabilité de chaque transision
-et backward et fordward permet de voir ce qui se passe avant et après pour observer la probalité de maintenant donc xi prend tout en considération
-"""
-def transition_probabilities(forward, backward, emissions, transition_matrix):
-    
+
+def transition_probabilities(
+    forward,
+    backward,
+    emissions,
+    transition_matrix
+):
+    """
+    Calcule xi(i,j) :
+    probabilité d'être dans l'état i
+    puis dans l'état j au bin suivant.
+    """
+
     n_bins = forward.shape[0]
     n_states = forward.shape[1]
 
-    xi = np.zeros((n_bins - 1, n_states, n_states))
+    xi = np.zeros(
+        (n_bins - 1, n_states, n_states)
+    )
 
     for i in range(n_bins - 1):
 
@@ -136,8 +183,13 @@ def transition_probabilities(forward, backward, emissions, transition_matrix):
 
             for next_state in range(n_states):
 
-                xi[i, previous_state, next_state] = (
-                    forward[i, previous_state]
+                xi[i,
+                   previous_state,
+                   next_state] = (
+                    forward[
+                        i,
+                        previous_state
+                    ]
                     * transition_matrix[
                         previous_state,
                         next_state
@@ -158,7 +210,6 @@ def transition_probabilities(forward, backward, emissions, transition_matrix):
                     next_state
                 ]
 
-        # Normalisation
         if total > 0:
             xi[i, :, :] /= total
 
@@ -200,84 +251,3 @@ def update_transition_matrix(xi):
 
 # une fois qu'on a fait ca grace a baum welch on va donc répété jusqu'a ce que la matrice ne change plus 
 
-def baum_welch(
-    emissions,
-    transition_matrix,
-    initial_probabilities,
-    max_iterations=100,
-    tolerance=1e-6
-):
-
-    for iteration in range(max_iterations): # répétitions de l'apprentissage plusieurs fois 
-
-        # 1. Forward avant chaque bins
-        forward = forward_algorithm(
-            emissions,
-            transition_matrix,
-            initial_probabilities
-        )
-
-        # 2. Backward après chaque bins 
-        backward = backward_algorithm(
-            emissions,
-            transition_matrix
-        )
-
-        # 3. Probabilités des transitions : Quelle est la probabilité que le modèle soit passé de α0 → α1, α1 → α1, etc. ?
-        xi = transition_probabilities(
-            forward,
-            backward,
-            emissions,
-            transition_matrix
-        )
-
-        # 4. Nouvelle matrice de transition
-        new_transition_matrix = update_transition_matrix(xi)
-
-        # 5. Vérifier si la matrice a suffisamment peu changé
-        difference = np.max(
-            np.abs(
-                new_transition_matrix
-                - transition_matrix
-            )
-        )
-
-        # 6. Mettre à jour la matrice
-        transition_matrix = new_transition_matrix
-
-        # 7. Arrêt si le modèle est stabilisé (on compare l'ancienne et la nouvelle)
-        if difference < tolerance: # si presque la matrice est la meme le modèle a convergé 
-            print(
-                f"Baum-Welch convergé après "
-                f"{iteration + 1} itérations"
-            )
-            break
-
-    return transition_matrix
-
-#test 
-emissions = np.array([
-    [0.90, 0.05, 0.05],  # α0
-    [0.85, 0.10, 0.05],  # α0
-    [0.80, 0.15, 0.05],  # α0
-
-    [0.05, 0.90, 0.05],  # α1
-    [0.05, 0.85, 0.10],  # α1
-    [0.10, 0.80, 0.10],  # α1
-
-    [0.05, 0.10, 0.85],  # α2
-    [0.05, 0.10, 0.90],  # α2
-    [0.10, 0.10, 0.80],  # α2
-
-    [0.80, 0.10, 0.10],  # α0
-    [0.85, 0.10, 0.05],  # α0
-    [0.90, 0.05, 0.05]   # α0
-])
-
-learned_transition_matrix = baum_welch(
-    emissions,
-    transition_matrix,
-    initial_probabilities
-)
-
-print(learned_transition_matrix)
