@@ -1,6 +1,6 @@
 from count_reads import count_reads
 from posterior import posterior_parameters, posterior_mean
-from emission import calculate_emissions, emission_probability
+from emission import calculate_emissions, emission_probability, build_emission_lookup
 from baum_welch import baum_welch
 
 
@@ -30,17 +30,75 @@ n1 = sum(es_counts.values())
 n2 = sum(np_counts.values())
 
 m = len(all_bins)
+
 tau = 3.0
+eta = 0.7
 
-# Test sur seulement 10 bins
-test_bins = [
-    ("chr1", 0, 30, 2),
-    ("chr1", 1000, 2, 30),
-    ("chr1", 2000, 10, 10)
-]
 
-a1, b1 = posterior_parameters(30, n1, m)
-a2, b2 = posterior_parameters(2, n2, m)
+print("Nombre total de fragments ESC :", n1)
+print("Nombre total de fragments NPC :", n2)
+print("Nombre de bins :", m)
+
+#Sélection bins candidtats
+threshold = 2 / (m * eta)
+
+candidate_bins = []
+
+for chromosome, start, x1, x2 in bins:
+
+    F = (x1 / n1) + (x2 / n2)
+
+    if F > threshold:
+
+        candidate_bins.append(
+            (chromosome, start, x1, x2)
+        )
+
+
+print("Seuil F :", threshold)
+print("Nombre de bins candidats :", len(candidate_bins))
+
+unique_count_pairs = set()
+
+for chromosome, start, x1, x2 in candidate_bins:
+    unique_count_pairs.add((x1, x2))
+
+print("Nombre de couples (xESC, xNPC) différents :",
+      len(unique_count_pairs))
+
+print("Construction de la lookup table...")
+
+emission_lookup = build_emission_lookup(
+    candidate_bins,
+    n1,
+    n2,
+    m,
+    tau
+)
+
+print(
+    "Nombre d'entrées dans la lookup table :",
+    len(emission_lookup)
+)
+
+
+
+
+#_---------------------------
+# Test sur seulement 1 bins
+print("TEST EMISSION")
+print("n1 =", n1)
+print("n2 =", n2)
+print("m =", m)
+
+x1 = 30
+x2 = 2
+
+a1, b1 = posterior_parameters(x1, n1, m)
+a2, b2 = posterior_parameters(x2, n2, m)
+
+print("a1,b1 =", a1, b1)
+print("a2,b2 =", a2, b2)
 
 e0 = emission_probability(
     30, 2,

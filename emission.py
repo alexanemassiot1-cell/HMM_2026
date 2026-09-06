@@ -1,55 +1,140 @@
 import numpy as np
+
 from scipy.integrate import quad
 from scipy.stats import beta as beta_dist
 from scipy.special import betaln, gammaln
 
 from posterior import posterior_parameters
 
-# Commencement de HMM
-"""
-probabilité d'emission sert a savoir si c'est dans alpha0 ou alpha 1 ou 2 
-"""
-from math import comb # comb sert a calculer le coefficient binomiale 
 
-
-
+# ============================================================
+# 1. Probabilité binomiale
+# ============================================================
 
 def binomial_probability(x, n, p):
-    return (
-        comb(n, x)
-        * p**x
-        * (1-p)**(n-x)
+
+    if p <= 0:
+        return 1.0 if x == 0 else 0.0
+
+    if p >= 1:
+        return 1.0 if x == n else 0.0
+
+    log_probability = (
+        gammaln(n + 1)
+        - gammaln(x + 1)
+        - gammaln(n - x + 1)
+        + x * np.log(p)
+        + (n - x) * np.log1p(-p)
     )
 
+    return np.exp(log_probability)
 
-"""
-x1 : nombre de fragments ESC dans la fenêtre
-x2 : nombre de fragments NPC dans la fenêtre
-n1 : nombre total de fragments ESC
-n2 : nombre total de fragments NPC
-m : nombre de fenêtres du génome
-tau : seuil utilisé pour définir les états
-etat : état considéré : 0, 1 ou 2
 
-"""
+# ============================================================
+# 2. Région autorisée pour p1
+# ============================================================
+
+def p1_bounds(p2, tau, etat):
+
+    if etat == 0:
+        # état non différentiel :
+        # 1/tau <= p1/p2 <= tau
+        low = p2 / tau
+        high = min(tau * p2, 1.0)
+
+    elif etat == 1:
+        # ESC enrichi :
+        # p1/p2 >= tau
+        low = tau * p2
+        high = 1.0
+
+    elif etat == 2:
+        # NPC enrichi :
+        # p1/p2 <= 1/tau
+        low = 0.0
+        high = p2 / tau
+
+    else:
+        raise ValueError("Etat doit être 0, 1 ou 2")
+
+    if low >= high:
+        return None
+
+    return low, high
+
+
+# ============================================================
+# 3. Probabilité d'une région sous deux lois Beta
+# ============================================================
+
+def region_probability(a1, b1, a2, b2, tau, etat):
+
+    def integrand(q):
+
+        # On transforme une probabilité uniforme q
+        # en quantile de la loi Beta de p2
+        p2 = beta_dist.ppf(q, a2, b2)
+
+        if not np.isfinite(p2):
+            return 0.0
+
+        bounds = p1_bounds(p2, tau, etat)
+
+        if bounds is None:
+            return 0.0
+
+        low, high = bounds
+
+        # Probabilité que p1 soit dans la région autorisée
+        probability_p1 = (
+            beta_dist.cdf(high, a1, b1)
+            - beta_dist.cdf(low, a1, b1)
+        )
+
+        if not np.isfinite(probability_p1):
+            return 0.0
+
+        return probability_p1
+
+    # On évite exactement les deux extrémités
+    eps = 1e-10
+
+    result, error = quad(
+        integrand,
+        eps,
+        1.0 - eps,
+        epsabs=1e-8,
+        epsrel=1e-6,
+        limit=200
+    )
+
+    return result
+
+# ============================================================
+# 4. Probabilité d'émission
+# ============================================================
+
 def emission_probability(
-    x1, x2,
-    n1, n2,
-    a1, b1,
-    a2, b2,
-    m, tau, etat
+    x1,
+    x2,
+    n1,
+    n2,
+    a1,
+    b1,
+    a2,
+    b2,
+    m,
+    tau,
+    etat
 ):
-# parametre calculer dans la fonction postérior.mean
+
     alpha = 1
     beta_param = m
 
-    # 1. Probabilité des observations 
-    """ 
-    gammaln : permet de calculer les factorielles sous forme logarithmique.
-    betaln : permet de calculer la distribution des bibliothèques ESC/NP sans manipuler des nombres très petit
-    """
+    # --------------------------------------------------------
+    # Log-vraisemblance marginale ESC
+    # --------------------------------------------------------
 
-    # ESC
     log_marginal_1 = (
         gammaln(n1 + 1)
         - gammaln(x1 + 1)
@@ -58,7 +143,10 @@ def emission_probability(
         - betaln(alpha, beta_param)
     )
 
-    # NPC
+    # --------------------------------------------------------
+    # Log-vraisemblance marginale NPC
+    # --------------------------------------------------------
+
     log_marginal_2 = (
         gammaln(n2 + 1)
         - gammaln(x2 + 1)
@@ -67,158 +155,85 @@ def emission_probability(
         - betaln(alpha, beta_param)
     )
 
-    # 2. Fonction donnant les limites de p1
-
-    def p1_bounds(p2): # sert à déterminer les valeurs de p_1 qui sont autorisées pour un état donné du HMM.
-
-        if etat == 0:
-            # α0 : non différentiel
-            # 1/tau <= p1/p2 <= tau = 3 définit à partir de quel rapport on considère que les deux intensités sont différentes.
-
-            low = p2 / tau
-            high = min(tau * p2, 1.0)
-
-        elif etat == 1:
-            # α1 : enrichi dans ESC
-            # p1/p2 > tau
-
-            low = tau * p2
-            high = 1.0
-
-        elif etat == 2:
-            # α2 :enrichi dans NPC
-            # p1/p2 < 1/tau
-
-            low = 0.0
-            high = p2 / tau
-
-        else:
-            raise ValueError(
-                "Etat doit être 0, 1 ou 2"
-            )
-
-        if low >= high:
-            return None
-
-        return low, high
-
-    # 3. Probabilité que (p1,p2) appartienne
-    #    à la région de l'état de HMM considéré 
-
-
-    def region_probability(a1, b1, a2, b2): 
-
-        def integrand(q): # On va intégrer sur toutes les valeurs possibles de p2
-	
-
-            # q est une probabilité cumulée pour p2
-            # On récupère donc la valeur correspondante
-            p2 = beta_dist.ppf(q, a2, b2) #
-
-            if not np.isfinite(p2):
-                return 0.0
-
-            bounds = p1_bounds(p2) # on cherche les valeurs autorisé
-
-            if bounds is None:
-                return 0.0
-
-            low, high = bounds
-
-            # Probabilité que p1 soit dans [low, high]
-            probability_p1 = (
-                beta_dist.cdf(high, a1, b1)
-                - beta_dist.cdf(low, a1, b1)
-            )
-
-            return probability_p1
-
-        # On évite exactement 0 et 1
-        """
-        pour ca il fait une intégrale :
-        Intègre numériquement integrand pour toutes les valeurs possibles de q entre 0 et 1, 
-        avec une certaine précision, puis retourne le résultat de cette intégrale.
-        """
-        eps = 1e-10 #Ne commence pas exactement à 0 et ne termine pas exactement à 1.
-        # Quelle est la proportion des valeurs possibles de p1 et p2 qui correspondent à l'état que je suis en train d'étudier ?
-        """quad est juste un outil qui fait une addition très précise.
-"""
-        result, error = quad(
-            integrand,
-            eps,
-            1 - eps,
-            epsabs=1e-8,
-            epsrel=1e-6,
-            limit=100
-        )
-        #Prends ma fonction integrand et calcule sa somme sur toutes les valeurs entre presque 0 et presque 1.
-
-        return result
-
-    # 4. Région sous le posterior
+    # --------------------------------------------------------
+    # Probabilité de la région sous le posterior
+    # --------------------------------------------------------
 
     posterior_region = region_probability(
-        a1, b1,
-        a2, b2
+        a1,
+        b1,
+        a2,
+        b2,
+        tau,
+        etat
     )
-    # avant d'observer les echantillions 
 
-    # 5. Région sous le prior
-    # vérification de sécurité
+    # --------------------------------------------------------
+    # Probabilité de la même région sous le prior
+    # --------------------------------------------------------
 
     prior_region = region_probability(
-        alpha, beta_param,
-        alpha, beta_param
+        alpha,
+        beta_param,
+        alpha,
+        beta_param,
+        tau,
+        etat
     )
 
     if posterior_region <= 0:
+        print("DEBUG : posterior_region = 0 pour état", etat)
         return 0.0
 
     if prior_region <= 0:
+        print("DEBUG : prior_region = 0 pour état", etat)
         return 0.0
-    
 
-    # 6. Probabilité d'émission finale
-    """ log_marginal_1 : Est-ce que les données observées en ESC sont compatibles avec les intensités que le modèle considère ?
-        log_marginal_2 : Est-ce que les données observées en NPS sont compatibles avec les intensités que le modèle considère ?
-    """
+    # --------------------------------------------------------
+    # Log de la probabilité d'émission
+    # --------------------------------------------------------
 
     log_emission = (
         log_marginal_1
         + log_marginal_2
-        + np.log(posterior_region) #a probabilité d'être dans la région correspondant à l'état après avoir observé les données.
-        - np.log(prior_region) #prior_region représente la même chose mais avant d'observer les données.
+        + np.log(posterior_region)
+        - np.log(prior_region)
     )
-    # on compare les données avant de les avoir avec ceux d'après 
-    # le log est pour éviter d'avoir des proba trop petites 
 
-    # Évite l'underflow
+    print(
+    "DEBUG état", etat,
+    "x1=", x1,
+    "x2=", x2,
+    "log_emission=", log_emission
+)
+
+    # Protection contre l'underflow
     if log_emission < -745:
         return 0.0
-    # PROTECTION informatique Si le log est inférieur à -745, la probabilité est tellement petite qu'on la considère comme 0.
-    return np.exp(log_emission) # exp pour enlever le log après les calcules
+
+    return np.exp(log_emission)
 
 
-def calculate_emissions(
-    bins,
-    n1,
-    n2,
-    m,
-    tau
-):
+# ============================================================
+# 5. Calcul des émissions pour plusieurs bins
+# ============================================================
+
+def calculate_emissions(bins, n1, n2, m, tau):
 
     emissions = []
 
     for chromosome, start, x1, x2 in bins:
 
-        print(chromosome, start, x1, x2)
-
         a1, b1 = posterior_parameters(
-            x1, n1, m
+            x1,
+            n1,
+            m
         )
 
         a2, b2 = posterior_parameters(
-            x2, n2, m
+            x2,
+            n2,
+            m
         )
 
         e0 = emission_probability(
@@ -248,6 +263,92 @@ def calculate_emissions(
             2
         )
 
-        emissions.append([e0, e1, e2])
+        emissions.append([
+            e0,
+            e1,
+            e2
+        ])
 
     return np.array(emissions)
+
+
+# ============================================================
+# 6. Lookup table
+# ============================================================
+
+def build_emission_lookup(
+    candidate_bins,
+    n1,
+    n2,
+    m,
+    tau
+):
+
+    lookup = {}
+
+    unique_pairs = set()
+
+    for chromosome, start, x1, x2 in candidate_bins:
+        unique_pairs.add((x1, x2))
+
+    print(
+        "Couples à calculer dans la lookup table :",
+        len(unique_pairs)
+    )
+
+    for number, (x1, x2) in enumerate(
+        sorted(unique_pairs),
+        start=1
+    ):
+
+        if number % 100 == 0:
+            print(
+                f"Progression : {number}/{len(unique_pairs)}"
+            )
+
+        a1, b1 = posterior_parameters(
+            x1,
+            n1,
+            m
+        )
+
+        a2, b2 = posterior_parameters(
+            x2,
+            n2,
+            m
+        )
+
+        e0 = emission_probability(
+            x1, x2,
+            n1, n2,
+            a1, b1,
+            a2, b2,
+            m, tau,
+            0
+        )
+
+        e1 = emission_probability(
+            x1, x2,
+            n1, n2,
+            a1, b1,
+            a2, b2,
+            m, tau,
+            1
+        )
+
+        e2 = emission_probability(
+            x1, x2,
+            n1, n2,
+            a1, b1,
+            a2, b2,
+            m, tau,
+            2
+        )
+
+        lookup[(x1, x2)] = (
+            e0,
+            e1,
+            e2
+        )
+
+    return lookup
