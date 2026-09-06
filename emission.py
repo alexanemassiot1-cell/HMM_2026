@@ -3,16 +3,16 @@ from scipy.integrate import quad
 from scipy.stats import beta as beta_dist
 from scipy.special import betaln, gammaln
 
+from posterior import posterior_parameters
+
 # Commencement de HMM
 """
 probabilité d'emission sert a savoir si c'est dans alpha0 ou alpha 1 ou 2 
 """
 from math import comb # comb sert a calculer le coefficient binomiale 
-import numpy as np
-from scipy.integrate import quad
-from scipy.special import gammaln
 
-from math import comb
+
+
 
 def binomial_probability(x, n, p):
     return (
@@ -198,28 +198,56 @@ def emission_probability(
     # PROTECTION informatique Si le log est inférieur à -745, la probabilité est tellement petite qu'on la considère comme 0.
     return np.exp(log_emission) # exp pour enlever le log après les calcules
 
-#test sur une fenettre
-x_es = 30
-x_np = 2
 
-n1 = 1000
-n2 = 1000
+def calculate_emissions(
+    bins,
+    n1,
+    n2,
+    m,
+    tau
+):
 
-m = 1000
-tau = 3.0
+    emissions = []
 
-e0 = emission_probability(
-    x_es, x_np, n1, n2, m, tau, 0
-)
+    for chromosome, start, x1, x2 in bins:
 
-e1 = emission_probability(
-    x_es, x_np, n1, n2, m, tau, 1
-)
+        print(chromosome, start, x1, x2)
 
-e2 = emission_probability(
-    x_es, x_np, n1, n2, m, tau, 2
-)
+        a1, b1 = posterior_parameters(
+            x1, n1, m
+        )
 
-print("Emission α0 :", e0)
-print("Emission α1 :", e1)
-print("Emission α2 :", e2)
+        a2, b2 = posterior_parameters(
+            x2, n2, m
+        )
+
+        e0 = emission_probability(
+            x1, x2,
+            n1, n2,
+            a1, b1,
+            a2, b2,
+            m, tau,
+            0
+        )
+
+        e1 = emission_probability(
+            x1, x2,
+            n1, n2,
+            a1, b1,
+            a2, b2,
+            m, tau,
+            1
+        )
+
+        e2 = emission_probability(
+            x1, x2,
+            n1, n2,
+            a1, b1,
+            a2, b2,
+            m, tau,
+            2
+        )
+
+        emissions.append([e0, e1, e2])
+
+    return np.array(emissions)
