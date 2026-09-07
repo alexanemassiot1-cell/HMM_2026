@@ -8,20 +8,19 @@ from posterior import posterior_parameters
 import warnings
 
 
-# ============================================================
 # 1. Probabilité binomiale
-# ============================================================
+
 
 def binomial_probability(x, n, p):
 
-    if p <= 0:
+    if p <= 0: 
         return 1.0 if x == 0 else 0.0
 
     if p >= 1:
         return 1.0 if x == n else 0.0
 
     log_probability = (
-        gammaln(n + 1)
+        gammaln(n + 1) # utilise les factoriel et pas les donné car beaucoup trop avec la fonction comb
         - gammaln(x + 1)
         - gammaln(n - x + 1)
         + x * np.log(p)
@@ -31,20 +30,18 @@ def binomial_probability(x, n, p):
     return np.exp(log_probability)
 
 
-# ============================================================
 # 2. Région autorisée pour p1
-# ============================================================
 
-def p1_bounds(p2, tau, etat):
+def p1_bounds(p2, tau, etat): # régions correspondante en 3 états p2 ESC et tau défini 3 et état : 0,1,2 
 
     if etat == 0:
-        # état non différentiel :
+        # état non différentiel : intensité proche
         # 1/tau <= p1/p2 <= tau
         low = p2 / tau
         high = min(tau * p2, 1.0)
 
     elif etat == 1:
-        # ESC enrichi :
+        # ESC enrichi : 
         # p1/p2 >= tau
         low = tau * p2
         high = 1.0
@@ -64,17 +61,18 @@ def p1_bounds(p2, tau, etat):
     return low, high
 
 
-# ============================================================
 # 3. Probabilité d'une région sous deux lois Beta
-# ============================================================
+
 
 def region_probability(a1, b1, a2, b2, tau, etat):
+#quelle proportion de la distribution jointe p1,p2 appartient à la région correspondant à l'état ?
 
     def integrand(q):
 
     # On transforme une probabilité uniforme q
     # en quantile de la loi Beta de p2
-        p2 = beta_dist.ppf(q, a2, b2)
+        p2 = beta_dist.ppf(q, a2, b2) # ppf c'est percent point function.
+        # permet de faire l'intégration dans un espace numérique plus stable.
 
         if not np.isfinite(p2):
             return 0.0
@@ -89,7 +87,7 @@ def region_probability(a1, b1, a2, b2, tau, etat):
     # Probabilité que p1 soit dans la région autorisée
         if etat == 1:
         # alpha1 : p1 >= low
-            probability_p1 = beta_dist.sf(low, a1, b1)
+            probability_p1 = beta_dist.sf(low, a1, b1) # pf : survival function =>  probabilité que \(p_1\) soit suffisamment élevé pour être ESC-enrichi.
 
         elif etat == 2:
         # alpha2 : p1 <= high
@@ -110,7 +108,7 @@ def region_probability(a1, b1, a2, b2, tau, etat):
     # On évite exactement les deux extrémités
     eps = 1e-10
 
-    result, error = quad(
+    result, error = quad( #effectue une intégration numérique / important car parce que la probabilité de la région n'a pas été écrite sous forme d'une simple valeur.
         integrand,
         eps,
         1.0 - eps,
@@ -121,9 +119,8 @@ def region_probability(a1, b1, a2, b2, tau, etat):
 
     return result
 
-# ============================================================
 # 4. Probabilité d'émission
-# ============================================================
+
 
 def emission_probability(
     x1,
@@ -142,9 +139,8 @@ def emission_probability(
     alpha = 1
     beta_param = m
 
-    # --------------------------------------------------------
-    # Log-vraisemblance marginale ESC
-    # --------------------------------------------------------
+    # Log-vraisemblance marginale ESC : correspond à la vraisemblance marginale des données ESC après intégration sur p1
+
 
     log_marginal_1 = (
         gammaln(n1 + 1)
@@ -154,9 +150,9 @@ def emission_probability(
         - betaln(alpha, beta_param)
     )
 
-    # --------------------------------------------------------
-    # Log-vraisemblance marginale NPC
-    # --------------------------------------------------------
+
+    # Log-vraisemblance marginale NPC : de meme mais sur NPC 
+
 
     log_marginal_2 = (
         gammaln(n2 + 1)
@@ -166,11 +162,9 @@ def emission_probability(
         - betaln(alpha, beta_param)
     )
 
-    # --------------------------------------------------------
     # Probabilité de la région sous le posterior
-    # --------------------------------------------------------
 
-    posterior_region = region_probability(
+    posterior_region = region_probability( # après avoir observé les données, quelle probabilité est dans la région correspondant à l'état ?
         a1,
         b1,
         a2,
@@ -179,11 +173,10 @@ def emission_probability(
         etat
     )
 
-    # --------------------------------------------------------
     # Probabilité de la même région sous le prior
-    # --------------------------------------------------------
 
-    prior_region = region_probability(
+
+    prior_region = region_probability( #avant d'observer les données, quelle probabilité était dans cette région ?
         alpha,
         beta_param,
         alpha,
@@ -200,10 +193,7 @@ def emission_probability(
         
         return 0.0
 
-    # --------------------------------------------------------
-    # Log de la probabilité d'émission
-    # --------------------------------------------------------
-
+    # Log de la probabilité d'émission (utilisation des log car les probabilités peuvent être extrêmement petites)
     log_emission = (
         log_marginal_1
         + log_marginal_2
@@ -219,11 +209,7 @@ def emission_probability(
 
     return np.exp(log_emission)
 
-
-# ============================================================
-# 5. Calcul des émissions pour plusieurs bins
-# ============================================================
-
+# 5. Calcul des émissions pour plusieurs bins : mais en soit je pourrais l'enlever car je la calucule dans ma look table
 def calculate_emissions(bins, n1, n2, m, tau):
 
     emissions = []
@@ -277,11 +263,7 @@ def calculate_emissions(bins, n1, n2, m, tau):
 
     return np.array(emissions)
 
-
-# ============================================================
-# 6. Lookup table
-# ============================================================
-
+# 6. Lookup table : La lookup table permet une optimisation informatique de calcul.
 def build_emission_lookup(
     candidate_bins,
     n1,

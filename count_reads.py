@@ -1,31 +1,31 @@
 #print(bin_start)
 from collections import defaultdict
-import gzip
+import gzip # décompresse les zip
 
-def count_reads(filename, bin_size=1000):
+def count_reads(filename, bin_size=1000): # fichier + tailles des fenetres génomique
 
     # Ensemble permettant de supprimer les doublons
-    # même position + même orientation
+    # même position + même orientation et mémorise les tags
     unique_tags = set()
 
     # Dictionnaire contenant le nombre de fragments par bin
-    counts = defaultdict(int)
+    counts = defaultdict(int) # qui va donc compter 
 
-    with gzip.open(filename, "rt") as f:
+    with gzip.open(filename, "rt") as f: # permet de le lire directement
 
-        for line in f:
+        for line in f: # ligne par ligne
 
-            if line.startswith("#"):
+            if line.startswith("#"): # on supprime les lignes qui commencent par #
                 continue
 
-            columns = line.strip().split("\t")
+            columns = line.strip().split("\t") # on sépare pour les mettres en colonnes 
 
             chromosome = columns[0]
             position = int(columns[1])
             strand = columns[3]
 
             # Suppression des doublons
-            key_tag = (chromosome, position, strand)
+            key_tag = (chromosome, position, strand) # 2 reads sont identiques si tout ses trucs sont identiques
 
             if key_tag in unique_tags:
                 continue
@@ -47,10 +47,3 @@ def count_reads(filename, bin_size=1000):
 
     return counts
 
-es_counts = count_reads(
-    "Files/GSM307619_ES.H3K27me3.aligned.txt.gz"
-)
-
-np_counts = count_reads(
-    "Files/GSM307614_NP.H3K27me3.aligned.txt.gz"
-)

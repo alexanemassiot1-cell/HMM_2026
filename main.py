@@ -1,6 +1,5 @@
 from count_reads import count_reads
-from posterior import posterior_parameters, posterior_mean
-from emission import calculate_emissions, emission_probability, build_emission_lookup, emissions_from_lookup
+from emission import build_emission_lookup, emissions_from_lookup
 from baum_welch import baum_welch
 from etat_transission import (
     forward_algorithm,
@@ -12,40 +11,40 @@ import numpy as np
 import random
 
 # 1. Lecture et comptage
-es_counts = count_reads("Files/GSM307619_ES.H3K27me3.aligned.txt.gz")
-np_counts = count_reads("Files/GSM307614_NP.H3K27me3.aligned.txt.gz")
-
+es_counts = count_reads("Files/GSM307619_ES.H3K27me3.aligned.txt.gz") # appel des fichier du comptage pour ESC
+np_counts = count_reads("Files/GSM307614_NP.H3K27me3.aligned.txt.gz")# appel des fichier du comptage pour NPC
 # 2. Création des bins
-all_bins = set(es_counts) | set(np_counts)
+all_bins = set(es_counts) | set(np_counts) # on unie les deux ensemble car un bin peut etre ESC et NPC
+# ensuite on veut conservé le bin  si il est au moins dans un des deux 
+bins = [] 
 
-bins = []
+for chromosome, start in sorted(all_bins): # on parcours tout les bins dans l'ordre genomique d'ou le sort
 
-for chromosome, start in sorted(all_bins):
-
-    x1 = es_counts.get((chromosome, start), 0)
-    x2 = np_counts.get((chromosome, start), 0)
+    x1 = es_counts.get((chromosome, start), 0) # pour chaque bin on met le nombre de ESC
+    x2 = np_counts.get((chromosome, start), 0)# pour chaque bin on met le nombre de NPC
+    # si aucun bin est présent ca renvoie 0
 
     bins.append(
         (chromosome, start, x1, x2)
-    )
+    )# on le stock dans une autre variable initier précedemment
 
 # 3. Paramètres globaux
-n1 = sum(es_counts.values())
-n2 = sum(np_counts.values())
+n1 = sum(es_counts.values())# nombre total de ESC après le prétraitement
+n2 = sum(np_counts.values())# nombre total de NPC après le prétraitement
+# cela servira à normaliser par la suite 
+m = len(all_bins) #représente donc le nombre de bins présents dans tes données.
 
-m = len(all_bins)
-
-tau = 3.0
-eta = 0.7
+tau = 3.0 #la différence minimale entre les deux intensités pour considérer plus enrichie que l'autre.
+eta = 0.7 # sélections des candidats 
 
 
 print("Nombre total de fragments ESC :", n1)
 print("Nombre total de fragments NPC :", n2)
 print("Nombre de bins :", m)
 
-#Sélection bins candidtats
-threshold = 2 / (m * eta)
-
+# Calcul de F(i) et sélection des bins candidats
+threshold = 2 / (m * eta) #C'est le seuil utilisé pour F(i). 
+# Car on veut éliminer les bins avec très peu de signal.
 candidate_bins = []
 
 for chromosome, start, x1, x2 in bins:
@@ -58,17 +57,12 @@ for chromosome, start, x1, x2 in bins:
             (chromosome, start, x1, x2)
         )
 
+# calcul de F(i) 
+"""C'est une étape de filtrage avant le HMM.
+Le HMM ne peut pas travailler directement sur tous les bins du génome."""
 
-print("Seuil F :", threshold)
-print("Nombre de bins candidats :", len(candidate_bins))
 
-unique_count_pairs = set()
 
-for chromosome, start, x1, x2 in candidate_bins:
-    unique_count_pairs.add((x1, x2))
-
-print("Nombre de couples (xESC, xNPC) différents :",
-      len(unique_count_pairs))
 
 print("Construction de la lookup table...")
 
@@ -98,7 +92,7 @@ training_indices = random.sample(
     range(len(candidate_bins)),
     n_training
 )
-training_indices.sort() # afin d'éviter que ce soit vraiment aléatoire et plus en adéquation avec le génome
+training_indices.sort() # Les régions sont sélectionnées aléatoirement, puis remises dans l'ordre génomique avant l'apprentissage.
 training_emissions = emissions[training_indices]
 
 print(
@@ -165,29 +159,6 @@ probabilities = state_probabilities(
     forward,
     backward
 )
-# Diagnostic des probabilités des états
-
-print("\nDIAGNOSTIC α2")
-
-print(
-    "Nombre avec P(α2) > 0.5 :",
-    np.sum(probabilities[:, 2] > 0.5)
-)
-
-print(
-    "Nombre avec P(α2) > 0.9 :",
-    np.sum(probabilities[:, 2] > 0.9)
-)
-
-print(
-    "Nombre avec P(α2) > 0.95 :",
-    np.sum(probabilities[:, 2] > 0.95)
-)
-
-
-print("Matrice des probabilités d'états :", probabilities.shape)
-
-
 
 # Chercher les bins où α2 est le plus probable
 best_alpha2_indices = np.argsort(
@@ -287,130 +258,91 @@ with open("resultats_HMM.tsv", "w") as out:
 print("Résultats sauvegardés dans resultats_HMM.tsv")
 
 
-"""
-print("Début de Baum-Welch sur les données réelles...")
+# 5. Fusion des bins DHMS consécutifs
 
-# 5. Apprentissage de la matrice de transition
-learned_transition_matrix = baum_welch(
-    emissions,
-    transition_matrix,
-    initial_probabilities
+def merge_dhms_bins(dhms):
+    regions = []
+
+    current_region = None
+
+    for row in dhms:
+        chromosome, start, x1, x2, p0, p1, p2, state = row
+
+        # On ignore les bins non différentiels
+        if state == "non_differentiel":
+            if current_region is not None:
+                regions.append(current_region)
+                current_region = None
+            continue
+
+        end = start + 1000
+
+        # Premier bin DHMS
+        if current_region is None:
+            current_region = [
+                chromosome,
+                start,
+                end,
+                state
+            ]
+            continue
+
+        current_chromosome, current_start, current_end, current_state = current_region
+
+        # Le bin est-il directement adjacent au précédent ?
+        if (
+            chromosome == current_chromosome
+            and start == current_end
+            and state == current_state
+        ):
+            # On prolonge la région
+            current_region[2] = end
+
+        else:
+            # Nouvelle région
+            regions.append(current_region)
+
+            current_region = [
+                chromosome,
+                start,
+                end,
+                state
+            ]
+
+    # Ajouter la dernière région
+    if current_region is not None:
+        regions.append(current_region)
+
+    return regions
+
+# Fusion des bins DHMS
+regions_dhms = merge_dhms_bins(dhms)
+
+print("\nAprès fusion des bins DHMS :")
+print("Nombre total de régions :", len(regions_dhms))
+
+n_esc_regions = sum(
+    1 for region in regions_dhms
+    if region[3] == "ESC"
 )
 
-print("Matrice de transition apprise :")
-print(learned_transition_matrix)
-
-
-#_---------------------------
-# Test sur seulement 1 bins
-print("TEST EMISSION")
-print("n1 =", n1)
-print("n2 =", n2)
-print("m =", m)
-
-x1 = 30
-x2 = 2
-
-a1, b1 = posterior_parameters(x1, n1, m)
-a2, b2 = posterior_parameters(x2, n2, m)
-
-print("a1,b1 =", a1, b1)
-print("a2,b2 =", a2, b2)
-
-e0 = emission_probability(
-    30, 2,
-    n1, n2,
-    a1, b1,
-    a2, b2,
-    m, tau,
-    0
+n_npc_regions = sum(
+    1 for region in regions_dhms
+    if region[3] == "NPC"
 )
 
-e1 = emission_probability(
-    30, 2,
-    n1, n2,
-    a1, b1,
-    a2, b2,
-    m, tau,
-    1
-)
+print("Nombre de régions ESC :", n_esc_regions)
+print("Nombre de régions NPC :", n_npc_regions)
 
-e2 = emission_probability(
-    30, 2,
-    n1, n2,
-    a1, b1,
-    a2, b2,
-    m, tau,
-    2
-)
+with open("regions_DHMS.tsv", "w") as out:
+    out.write("chrom\tstart\tend\tetat\n")
 
-print("Emission α0 :", e0)
-print("Emission α1 :", e1)
-print("Emission α2 :", e2)
-"""
-"""emissions = calculate_emissions(
-    test_bins,
-    n1,
-    n2,
-    m,
-    tau
-)
-
-print(emissions)
-
-# 4. Calcul des émissions
-emissions = calculate_emissions(
-    bins,
-    n1,
-    n2,
-    m,
-    tau
-)
-transition_matrix = np.array([
-    [0.90, 0.05, 0.05],
-    [0.05, 0.90, 0.05],
-    [0.05, 0.05, 0.90]
-])
-
-initial_probabilities = np.array([
-    1.0,
-    0.0,
-    0.0
-])
-
-
-# 5. HMM / Baum-Welch
-learned_transition_matrix = baum_welch(
-    emissions,
-    transition_matrix,
-    initial_probabilities
-)
-
-# 6. Sauvegarde du résultat
-with open("resultats_HMM.tsv", "w") as out:
-
-    out.write("chrom\tstart\tES\tNP\talpha0\talpha1\talpha2\n")
-
-    for i, (chromosome, start, x1, x2) in enumerate(bins):
-
+    for chromosome, start, end, state in regions_dhms:
         out.write(
             f"{chromosome}\t"
             f"{start}\t"
-            f"{x1}\t"
-            f"{x2}\t"
-            f"{emissions[i, 0]}\t"
-            f"{emissions[i, 1]}\t"
-            f"{emissions[i, 2]}\n"
+            f"{end}\t"
+            f"{state}\n"
         )
 
-
-
-print(learned_transition_matrix)
-emissions = calculate_emissions(
-    bins,
-    n1,
-    n2,
-    m,
-    tau
-)
-"""
+print("Régions sauvegardées dans regions_DHMS.tsv")
