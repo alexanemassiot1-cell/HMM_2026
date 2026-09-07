@@ -2,10 +2,14 @@ from count_reads import count_reads
 from posterior import posterior_parameters, posterior_mean
 from emission import calculate_emissions, emission_probability, build_emission_lookup, emissions_from_lookup
 from baum_welch import baum_welch
-
+from etat_transission import (
+    forward_algorithm,
+    backward_algorithm,
+    state_probabilities
+)
 
 import numpy as np
-
+import random
 
 # 1. Lecture et comptage
 es_counts = count_reads("Files/GSM307619_ES.H3K27me3.aligned.txt.gz")
@@ -84,19 +88,31 @@ emissions = emissions_from_lookup(
 print("Matrice des émissions :", emissions.shape)
 
 
-#pour pas faire sur toute l'echantilions on fait sur 1000 aléatoirement
-test_candidate_bins = candidate_bins[:1000]
+# 4. Sélection aléatoire de 10 000 bins pour l'apprentissage
 
-test_emissions = emissions_from_lookup(
-    test_candidate_bins,
-    emission_lookup
+random.seed(42)
+
+n_training = 10000
+
+training_indices = random.sample(
+    range(len(candidate_bins)),
+    n_training
+)
+training_indices.sort() # afin d'éviter que ce soit vraiment aléatoire et plus en adéquation avec le génome
+training_emissions = emissions[training_indices]
+
+print(
+    "Nombre de régions utilisées pour l'apprentissage :",
+    len(training_emissions)
 )
 
-print("Test emissions :", test_emissions.shape)
-# 4. Initialisation de la matrice de transition
-# TEST BAUM-WELCH SUR 1000 BINS RÉELS
+print(
+    "Matrice des émissions d'entraînement :",
+    training_emissions.shape
+)
 
-test_emissions = emissions[:1000]
+
+# 5. Initialisation de la matrice de transition
 
 transition_matrix = np.array([
     [0.90, 0.05, 0.05],
@@ -104,23 +120,172 @@ transition_matrix = np.array([
     [0.05, 0.05, 0.90]
 ])
 
+
+# L'état initial est alpha0
+
 initial_probabilities = np.array([
     1.0,
     0.0,
     0.0
 ])
 
-print("Matrice test :", test_emissions.shape)
-print("Début Baum-Welch sur 1000 bins réels...")
+
+# 6. Baum-Welch
+
+print("Début Baum-Welch sur les 10 000 régions...")
 
 learned_transition_matrix = baum_welch(
-    test_emissions,
+    training_emissions,
     transition_matrix,
     initial_probabilities
 )
 
 print("Matrice de transition apprise :")
 print(learned_transition_matrix)
+
+# une fois le modèle appris on fait sur les données 
+# 7. Forward-Backward final sur tous les bins candidats
+
+print("Début du Forward-Backward final...")
+
+forward, scaling = forward_algorithm(
+    emissions,
+    learned_transition_matrix,
+    initial_probabilities
+)
+
+backward = backward_algorithm(
+    emissions,
+    learned_transition_matrix,
+    scaling
+)
+
+# 8. Probabilités des états
+probabilities = state_probabilities(
+    forward,
+    backward
+)
+# Diagnostic des probabilités des états
+
+print("\nDIAGNOSTIC α2")
+
+print(
+    "Nombre avec P(α2) > 0.5 :",
+    np.sum(probabilities[:, 2] > 0.5)
+)
+
+print(
+    "Nombre avec P(α2) > 0.9 :",
+    np.sum(probabilities[:, 2] > 0.9)
+)
+
+print(
+    "Nombre avec P(α2) > 0.95 :",
+    np.sum(probabilities[:, 2] > 0.95)
+)
+
+
+print("Matrice des probabilités d'états :", probabilities.shape)
+
+
+
+# Chercher les bins où α2 est le plus probable
+best_alpha2_indices = np.argsort(
+    probabilities[:, 2]
+)[-10:][::-1]
+
+print("\n10 meilleurs bins pour α2 :")
+
+for i in best_alpha2_indices:
+
+    chromosome, start, x1, x2 = candidate_bins[i]
+
+    print(
+        chromosome,
+        start,
+        "ES =", x1,
+        "NP =", x2,
+        "Pα0 =", probabilities[i, 0],
+        "Pα1 =", probabilities[i, 1],
+        "Pα2 =", probabilities[i, 2]
+    )
+
+
+# 9. Identification des DHMS
+
+rho = 0.95
+
+dhms = []
+
+for i, (chromosome, start, x1, x2) in enumerate(candidate_bins):
+
+    p_alpha0 = probabilities[i, 0]
+    p_alpha1 = probabilities[i, 1]
+    p_alpha2 = probabilities[i, 2]
+
+    if p_alpha1 > rho:
+        state = "ESC"
+
+    elif p_alpha2 > rho:
+        state = "NPC"
+
+    else:
+        state = "non_differentiel"
+
+    dhms.append(
+        (
+            chromosome,
+            start,
+            x1,
+            x2,
+            p_alpha0,
+            p_alpha1,
+            p_alpha2,
+            state
+        )
+    )
+
+print("Nombre total de bins candidats :", len(candidate_bins))
+
+print(
+    "Nombre de bins ESC-enrichis :",
+    sum(1 for x in dhms if x[7] == "ESC")
+)
+
+print(
+    "Nombre de bins NPC-enrichis :",
+    sum(1 for x in dhms if x[7] == "NPC")
+)
+
+print(
+    "Nombre de bins non différentiels :",
+    sum(1 for x in dhms if x[7] == "non_differentiel")
+)
+
+
+ # fichier résultat
+with open("resultats_HMM.tsv", "w") as out:
+
+    out.write(
+        "chrom\tstart\tES\tNP\t"
+        "P_alpha0\tP_alpha1\tP_alpha2\tetat\n"
+    )
+
+    for row in dhms:
+
+        out.write(
+            f"{row[0]}\t"
+            f"{row[1]}\t"
+            f"{row[2]}\t"
+            f"{row[3]}\t"
+            f"{row[4]}\t"
+            f"{row[5]}\t"
+            f"{row[6]}\t"
+            f"{row[7]}\n"
+        )
+
+print("Résultats sauvegardés dans resultats_HMM.tsv")
+
 
 """
 print("Début de Baum-Welch sur les données réelles...")
