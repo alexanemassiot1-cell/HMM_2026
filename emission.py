@@ -7,30 +7,10 @@ from scipy.special import betaln, gammaln
 from posterior import posterior_parameters
 import warnings
 
-
-# 1. Probabilité binomiale
-
-
-def binomial_probability(x, n, p):
-
-    if p <= 0: 
-        return 1.0 if x == 0 else 0.0
-
-    if p >= 1:
-        return 1.0 if x == n else 0.0
-
-    log_probability = (
-        gammaln(n + 1) # utilise les factoriel et pas les donné car beaucoup trop avec la fonction comb
-        - gammaln(x + 1)
-        - gammaln(n - x + 1)
-        + x * np.log(p)
-        + (n - x) * np.log1p(-p)
-    )
-
-    return np.exp(log_probability)
+from scipy.integrate import quad, IntegrationWarning
 
 
-# 2. Région autorisée pour p1
+# 1. Région autorisée pour p1
 
 def p1_bounds(p2, tau, etat): # régions correspondante en 3 états p2 ESC et tau défini 3 et état : 0,1,2 
 
@@ -65,14 +45,15 @@ def p1_bounds(p2, tau, etat): # régions correspondante en 3 états p2 ESC et ta
 
 
 def region_probability(a1, b1, a2, b2, tau, etat):
-#quelle proportion de la distribution jointe p1,p2 appartient à la région correspondant à l'état ?
+
+    # Quelle proportion de la distribution jointe p1,p2
+    # appartient à la région correspondant à l'état ?
 
     def integrand(q):
 
-    # On transforme une probabilité uniforme q
-    # en quantile de la loi Beta de p2
-        p2 = beta_dist.ppf(q, a2, b2) # ppf c'est percent point function.
-        # permet de faire l'intégration dans un espace numérique plus stable.
+        # q est une probabilité uniforme entre 0 et 1.
+        # On la transforme en quantile de la loi Beta de p2.
+        p2 = beta_dist.ppf(q, a2, b2) 
 
         if not np.isfinite(p2):
             return 0.0
@@ -84,44 +65,78 @@ def region_probability(a1, b1, a2, b2, tau, etat):
 
         low, high = bounds
 
-    # Probabilité que p1 soit dans la région autorisée
+        # Probabilité que p1 appartienne à la région autorisée
         if etat == 1:
-        # alpha1 : p1 >= low
-            probability_p1 = beta_dist.sf(low, a1, b1) # pf : survival function =>  probabilité que \(p_1\) soit suffisamment élevé pour être ESC-enrichi.
+
+            # alpha1 : p1 >= low
+            probability_p1 = beta_dist.sf(
+                low,
+                a1,
+                b1
+            )
 
         elif etat == 2:
-        # alpha2 : p1 <= high
-            probability_p1 = beta_dist.cdf(high, a1, b1)
+
+            # alpha2 : p1 <= high
+            probability_p1 = beta_dist.cdf(
+                high,
+                a1,
+                b1
+            )
 
         else:
-        # alpha0 : low <= p1 <= high
+
+            # alpha0 : low <= p1 <= high
             probability_p1 = (
-            beta_dist.cdf(high, a1, b1)
-            - beta_dist.cdf(low, a1, b1)
-        )
+                beta_dist.cdf(high, a1, b1)
+                - beta_dist.cdf(low, a1, b1)
+            )
 
         if not np.isfinite(probability_p1):
             return 0.0
 
         return probability_p1
 
-    # On évite exactement les deux extrémités
+    # On évite les extrémités exactes 0 et 1.
     eps = 1e-10
 
-    result, error = quad( #effectue une intégration numérique / important car parce que la probabilité de la région n'a pas été écrite sous forme d'une simple valeur.
-        integrand,
+    # Découpage de l'intervalle pour aider l'intégrateur
+    points = [
         eps,
-        1.0 - eps,
-        epsabs=1e-8,
-        epsrel=1e-6,
-        limit=200
-    )
+        1e-8,
+        1e-7,
+        1e-6,
+        1e-5,
+        1e-4,
+        1e-3,
+        1e-2,
+        0.1,
+        0.5,
+        1.0 - eps
+    ]
 
-    return result
+    result = 0.0
+    error = 0.0
 
-# 4. Probabilité d'émission
+    for low, high in zip(points[:-1], points[1:]):
 
+        sub_result, sub_error = quad(
+            integrand,
+            low,
+            high,
+            epsabs=1e-10,
+            epsrel=1e-7,
+            limit=100
+        )
 
+        result += sub_result
+        error += sub_error
+
+    if not np.isfinite(result):
+        return 0.0
+
+    return max(0.0, min(1.0, result))
+# 3. Probabilité d'émission
 def emission_probability(
     x1,
     x2,
@@ -209,61 +224,8 @@ def emission_probability(
 
     return np.exp(log_emission)
 
-# 5. Calcul des émissions pour plusieurs bins : mais en soit je pourrais l'enlever car je la calucule dans ma look table
-def calculate_emissions(bins, n1, n2, m, tau):
 
-    emissions = []
-
-    for chromosome, start, x1, x2 in bins:
-
-        a1, b1 = posterior_parameters(
-            x1,
-            n1,
-            m
-        )
-
-        a2, b2 = posterior_parameters(
-            x2,
-            n2,
-            m
-        )
-
-        e0 = emission_probability(
-            x1, x2,
-            n1, n2,
-            a1, b1,
-            a2, b2,
-            m, tau,
-            0
-        )
-
-        e1 = emission_probability(
-            x1, x2,
-            n1, n2,
-            a1, b1,
-            a2, b2,
-            m, tau,
-            1
-        )
-
-        e2 = emission_probability(
-            x1, x2,
-            n1, n2,
-            a1, b1,
-            a2, b2,
-            m, tau,
-            2
-        )
-
-        emissions.append([
-            e0,
-            e1,
-            e2
-        ])
-
-    return np.array(emissions)
-
-# 6. Lookup table : La lookup table permet une optimisation informatique de calcul.
+# 4. Lookup table : La lookup table permet une optimisation informatique de calcul.
 def build_emission_lookup(
     candidate_bins,
     n1,
@@ -306,10 +268,9 @@ def build_emission_lookup(
             m
         )
 
-        with warnings.catch_warnings(record=True) as caught_warnings:
-            warnings.simplefilter("always")
+    
 
-            e0 = emission_probability(
+        e0 = emission_probability(
         x1, x2,
         n1, n2,
         a1, b1,
@@ -317,15 +278,8 @@ def build_emission_lookup(
         m, tau,
         0
     )
-            if caught_warnings:
-                print(
-            "WARNING pour le couple :",
-            (x1, x2),
-            "état α0"
-        )
-        with warnings.catch_warnings(record=True) as caught_warnings:
-            warnings.simplefilter("always")
-            e1 = emission_probability(
+
+        e1 = emission_probability(
         x1, x2,
         n1, n2,
         a1, b1,
@@ -333,28 +287,13 @@ def build_emission_lookup(
         m, tau,
         1
     )
-            if caught_warnings:
-                print(
-            "WARNING pour le couple :",
-            (x1, x2),
-            "état α1"
-        )
-
-        with warnings.catch_warnings(record=True) as caught_warnings:
-            warnings.simplefilter("always")
-            e2 = emission_probability(
-        x1, x2,
-        n1, n2,
-        a1, b1,
-        a2, b2,
-        m, tau,
-        2
-    )
-            if caught_warnings:
-                print(
-            "WARNING pour le couple :",
-            (x1, x2),
-            "état α2"
+        e2 = emission_probability(
+            x1, x2,
+            n1, n2,
+            a1, b1,
+            a2, b2,
+            m, tau,
+            2
         )
 
         lookup[(x1, x2)] = (
@@ -366,7 +305,7 @@ def build_emission_lookup(
     return lookup
 
 
-# transformer la table en matrice 
+#5. transformer la table en matrice 
 def emissions_from_lookup(candidate_bins, emission_lookup):
 
     emissions = []

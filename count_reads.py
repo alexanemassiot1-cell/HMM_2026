@@ -27,10 +27,10 @@ def count_reads(filename, bin_size=1000): # fichier + tailles des fenetres géno
             # Suppression des doublons
             key_tag = (chromosome, position, strand) # 2 reads sont identiques si tout ses trucs sont identiques
 
-            if key_tag in unique_tags:
+            if key_tag in unique_tags: # si éxites déjà
                 continue
 
-            unique_tags.add(key_tag)
+            unique_tags.add(key_tag) # si existe pas on le mémorise
 
             # Estimation du centre du fragment
             if strand == "+":
@@ -39,11 +39,11 @@ def count_reads(filename, bin_size=1000): # fichier + tailles des fenetres géno
                 fragment_center = position - 100
 
             # Attribution à un bin de 1 kb
-            bin_start = (fragment_center // bin_size) * bin_size
+            bin_start = (fragment_center // bin_size) * bin_size # attribution à bin divise et multiplie par 10000
 
             key_bin = (chromosome, bin_start)
 
-            counts[key_bin] += 1
+            counts[key_bin] += 1  #comptage des bins
 
     return counts
 

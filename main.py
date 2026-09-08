@@ -84,7 +84,7 @@ print("Matrice des émissions :", emissions.shape)
 
 # 4. Sélection aléatoire de 10 000 bins pour l'apprentissage
 
-random.seed(42)
+random.seed(1)
 
 n_training = 10000
 
