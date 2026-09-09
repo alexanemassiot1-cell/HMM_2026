@@ -5,8 +5,8 @@ import numpy as np
 xu_esc = 3833
 xu_npc = 889
 
-my_esc = 3876
-my_npc = 2346
+my_esc = 6135
+my_npc = 4147
 
 categories = ["ESC enrichi", "NPC enrichi"]
 
