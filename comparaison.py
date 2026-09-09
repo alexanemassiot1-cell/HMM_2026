@@ -5,13 +5,13 @@ import numpy as np
 xu_esc = 3833
 xu_npc = 889
 
-nous_esc = 3876
-nous_npc = 2346
+my_esc = 3876
+my_npc = 2346
 
 categories = ["ESC enrichi", "NPC enrichi"]
 
 xu = [xu_esc, xu_npc]
-nous = [nous_esc, nous_npc]
+my = [my_esc, my_npc]
 
 x = np.arange(len(categories))
 largeur = 0.35
@@ -29,7 +29,7 @@ barres_xu = ax.bar(
 
 barres_nous = ax.bar(
     x + largeur / 2,
-    nous,
+    my,
     largeur,
     label="Mon analyse",
     color="pink"
